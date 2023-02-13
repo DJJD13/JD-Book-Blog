@@ -1,0 +1,4 @@
+# Required pip installs
+flask
+flask-wtf
+flask_sqlalchemy
