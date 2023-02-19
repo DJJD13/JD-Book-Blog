@@ -1,36 +1,18 @@
-from flask import render_template, url_for, flash, redirect, request
+import os
+import secrets
+from PIL import Image
+from flask import render_template, url_for, flash, redirect, request, abort
 from flaskblog import app, db, bcrypt
-from flaskblog.forms import RegistrationForm, LoginForm
+from flaskblog.forms import RegistrationForm, LoginForm, UpdateAccountForm, BookForm
 from flaskblog.models import User, Book
 from flask_login import login_user, current_user, logout_user, login_required
-
-books = [
-    {
-        'title': 'Moby Dick',
-        'author': 'Herman Melville',
-        'rating': '5/5',
-        'content': 'My favorite book',
-        'poster': 'JD Eggert',
-        # 'date_started': 'March 15th, 2020',
-        # 'date_finished': 'April 15th, 2020',
-        'date_posted': 'April 20th, 2020'
-    },
-    {
-        'title': 'Pride & Prejudice',
-        'author': 'Jane Austin',
-        'rating': '5/5',
-        'content': 'Another favorite book',
-        'poster': 'Domenic Egger',
-        # 'date_started': 'March 18th, 2020',
-        # 'date_finished': 'April 19th, 2020',
-        'date_posted': 'April 22nd, 2020'
-    }
-]
 
 
 @app.route("/")
 @app.route("/home")
 def home():
+    page = request.args.get('page', 1, type=int)
+    books = Book.query.order_by(Book.date_posted.desc()).paginate(page=page, per_page=5)
     return render_template('home.html', books=books)
 
 
@@ -76,7 +58,108 @@ def logout():
     logout_user()
     return redirect(url_for('home'))
 
-@app.route("/account")
+
+def save_picture(form_picture):
+    # Generate random hex for file name, then split the extension from the original name
+    # '_' used to 'throw away' variable we won't use
+    random_hex = secrets.token_hex(8)
+    _, f_ext = os.path.splitext(form_picture.filename)
+    picture_fn = random_hex + f_ext
+    # Gives full path name to picture file name in the profile_pics dir, then save there
+    picture_path = os.path.join(app.root_path, 'static/profile_pics', picture_fn)
+
+    # Use Pillow (PIL) to resize image before saving
+    output_size = (125, 125)
+    i = Image.open(form_picture)
+    i.thumbnail(output_size)
+    i.save(picture_path)
+
+    return picture_fn
+
+
+@app.route("/account", methods=["GET", "POST"])
 @login_required
 def account():
-    return render_template('account.html', title='Account')
+    form = UpdateAccountForm()
+    if form.validate_on_submit():
+        if form.picture.data:
+            picture_file = save_picture(form.picture.data)
+            current_user.image_file = picture_file
+        current_user.username = form.username.data
+        current_user.email = form.email.data
+        db.session.commit()
+        flash('Your account has been updated!', 'success')
+        return redirect(url_for('account'))
+    elif request.method == 'GET':
+        form.username.data = current_user.username
+        form.email.data = current_user.email
+    image_file = url_for('static', filename='profile_pics/' + current_user.image_file)
+    return render_template('account.html', title='Account',
+                           image_file=image_file, form=form)
+
+
+@app.route("/book/new", methods=["GET", "POST"])
+@login_required
+def new_book():
+    form = BookForm()
+    if form.validate_on_submit():
+        book = Book(title=form.title.data, author=form.author.data,
+                    rating=form.rating.data, content=form.content.data, poster=current_user)
+        db.session.add(book)
+        db.session.commit()
+        flash('Book has been created!', 'success')
+        return redirect(url_for('home'))
+    return render_template('create_book.html', title='New Book',
+                           form=form, legend='New Book')
+
+
+@app.route("/book/<int:book_id>")
+def book(book_id):
+    book = Book.query.get_or_404(book_id)
+    return render_template('book.html', title=book.title, book=book)
+
+
+@app.route("/book/<int:book_id>/update", methods=["GET", "POST"])
+@login_required
+def update_book(book_id):
+    book = Book.query.get_or_404(book_id)
+    if book.poster != current_user:
+        abort(403)
+    form = BookForm()
+    if form.validate_on_submit():
+        book.title = form.title.data
+        book.author = form.author.data
+        book.rating = form.rating.data
+        book.content = form.content.data
+        db.session.commit()
+        flash('Your book has been updated!', 'success')
+        return redirect(url_for('book', book_id=book_id))
+    elif request.method == 'GET':
+        form.title.data = book.title
+        form.author.data = book.author
+        form.rating.data = book.rating
+        form.content.data = book.content
+    return render_template('create_book.html', title='Update Book',
+                           form=form, legend='Update Book')
+
+
+@app.route("/book/<int:book_id>/delete", methods=["POST"])
+@login_required
+def delete_book(book_id):
+    book = Book.query.get_or_404(book_id)
+    if book.poster != current_user:
+        abort(403)
+    db.session.delete(book)
+    db.session.commit()
+    flash('Your book has been deleted!', 'success')
+    return redirect(url_for('home'))
+
+
+@app.route("/user/<string:username>")
+def user_books(username):
+    page = request.args.get('page', 1, type=int)
+    user = User.query.filter_by(username=username).first_or_404()
+    books = Book.query.filter_by(poster=user)\
+        .order_by(Book.date_posted.desc())\
+        .paginate(page=page, per_page=5)
+    return render_template('user_books.html', books=books, user=user)
