@@ -1,6 +1,9 @@
 from datetime import datetime
+from flask import current_app
 from flaskblog import db, login_manager
 from flask_login import UserMixin
+# This is deprecated. Change to a different JWS token library like pyjwt
+from itsdangerous import TimedJSONWebSignatureSerializer as Serializer
 
 
 # This decorator is necessary for setting up the login manager
@@ -17,6 +20,19 @@ class User(db.Model, UserMixin):
     image_file = db.Column(db.String(20), nullable=False, default='default.jpg')
     password = db.Column(db.String(60), nullable=False)
     books = db.relationship('Book', backref='poster', lazy=True)
+
+    def get_reset_token(self, expires_sec=1800):
+        s = Serializer(current_app.config['SECRET_KEY'], expires_sec)
+        return s.dumps({'user_id': self.id}).decode('utf-8')
+
+    @staticmethod
+    def verify_reset_token(token):
+        s = Serializer(current_app.config['SECRET_KEY'])
+        try:
+            user_id = s.loads(token)['user_id']
+        except:
+            return None
+        return User.query.get(user_id)
 
     # Sets how we print out the User
     def __repr__(self):

@@ -1,4 +1,5 @@
 # Required pip installs
+# pip install --force-reinstall -v "itsdangerous==2.0.1"
 flask
 flask-wtf
 flask_sqlalchemy
@@ -6,3 +7,5 @@ email-validator
 flask-bcrypt
 flask-login
 Pillow
+itsdangerous == 2.0.1
+flask-mail
